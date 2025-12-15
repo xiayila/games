@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D Maze Game</title>
+    <style>
+        body { margin: 0; overflow: hidden; }
+        canvas { display: block; }
+        #info {
+            position: absolute;
+            top: 10px;
+            width: 100%;
+            text-align: center;
+            color: white;
+            font-family: Arial, sans-serif;
+            font-size: 24px;
+            z-index: 1;
+        }
+        #crosshair {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 4px;
+            height: 4px;
+            background-color: white;
+            border-radius: 50%;
+            transform: translate(-50%, -50%);
+            z-index: 2;
+        }
+        #win-message {
+            display: none;
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: #00ff00;
+            font-size: 72px;
+            font-weight: bold;
+            text-align: center;
+            z-index: 3;
+            text-shadow: 0 0 15px #000;
+        }
+    </style>
+</head>
+<body>
+    <div id="info">Click to start, use WASD to move, and Mouse to look around.</div>
+    <div id="crosshair"></div>
+    <div id="win-message">游戏成功</div>
+
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { PointerLockControls } from 'three/addons/controls/PointerLockControls.js';
+
+        // --- SCENE SETUP ---
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x90EE90);
+        scene.fog = new THREE.Fog(0x90EE90, 0, 150);
+
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(window.devicePixelRatio);
+        document.body.appendChild(renderer.domElement);
+
+        // --- LIGHTING ---
+        const ambientLight = new THREE.AmbientLight(0x404040, 5); // Increased intensity
+        scene.add(ambientLight);
+
+        const directionalLight = new THREE.DirectionalLight(0xffffff, 2.5); // Increased intensity
+        directionalLight.position.set(50, 50, 50);
+        scene.add(directionalLight);
+        
+        // --- CONTROLS ---
+        const controls = new PointerLockControls(camera, document.body);
+        const info = document.getElementById('info');
+        const crosshair = document.getElementById('crosshair');
+
+        document.body.addEventListener('click', () => {
+            controls.lock();
+        });
+
+        controls.addEventListener('lock', () => {
+            info.style.display = 'none';
+            crosshair.style.display = 'block';
+        });
+
+        controls.addEventListener('unlock', () => {
+            info.style.display = 'block';
+            crosshair.style.display = 'none';
+        });
+
+        scene.add(controls.getObject());
+
+        // --- PLAYER MOVEMENT ---
+        const moveSpeed = 5.0;
+        const velocity = new THREE.Vector3();
+        const direction = new THREE.Vector3();
+        let moveForward = false;
+        let moveBackward = false;
+        let moveLeft = false;
+        let moveRight = false;
+        
+        const onKeyDown = (event) => {
+            switch (event.code) {
+                case 'KeyW':
+                case 'ArrowUp':
+                    moveForward = true;
+                    break;
+                case 'KeyA':
+                case 'ArrowLeft':
+                    moveLeft = true;
+                    break;
+                case 'KeyS':
+                case 'ArrowDown':
+                    moveBackward = true;
+                    break;
+                case 'KeyD':
+                case 'ArrowRight':
+                    moveRight = true;
+                    break;
+            }
+        };
+
+        const onKeyUp = (event) => {
+            switch (event.code) {
+                case 'KeyW':
+                case 'ArrowUp':
+                    moveForward = false;
+                    break;
+                case 'KeyA':
+                case 'ArrowLeft':
+                    moveLeft = false;
+                    break;
+                case 'KeyS':
+                case 'ArrowDown':
+                    moveBackward = false;
+                    break;
+                case 'KeyD':
+                case 'ArrowRight':
+                    moveRight = false;
+                    break;
+            }
+        };
+        
+        document.addEventListener('keydown', onKeyDown);
+        document.addEventListener('keyup', onKeyUp);
+
+        // --- MAZE GENERATION ---
+        const mazeSize = 25; // Must be an odd number
+        const wallSize = 5;
+        const wallHeight = 5;
+        const maze = [];
+        const walls = []; // To store wall objects for collision detection
+
+        function initMaze() {
+            for (let i = 0; i < mazeSize; i++) {
+                maze[i] = [];
+                for (let j = 0; j < mazeSize; j++) {
+                    maze[i][j] = 1; // 1 = wall, 0 = path
+                }
+            }
+        }
+
+        function generateMaze(x, y) {
+            maze[x][y] = 0;
+            const dirs = [[0, -2], [0, 2], [-2, 0], [2, 0]];
+            dirs.sort(() => Math.random() - 0.5); // Shuffle directions
+
+            for (const [dx, dy] of dirs) {
+                const nx = x + dx;
+                const ny = y + dy;
+                if (nx > 0 && nx < mazeSize - 1 && ny > 0 && ny < mazeSize - 1 && maze[nx][ny] === 1) {
+                    maze[nx - dx / 2][ny - dy / 2] = 0;
+                    generateMaze(nx, ny);
+                }
+            }
+        }
+
+        // --- BUILD 3D MAZE ---
+        const wallGeometry = new THREE.BoxGeometry(wallSize, wallHeight, wallSize);
+        const wallMaterial = new THREE.MeshStandardMaterial({ color: 'skyblue' });
+
+        function buildMaze() {
+            initMaze();
+            generateMaze(1, 1);
+
+            // Start and End points
+            maze[1][0] = 0; // Entrance
+            maze[mazeSize - 2][mazeSize - 1] = 0; // Exit
+            
+            const offset = (mazeSize * wallSize) / 2;
+
+            for (let i = 0; i < mazeSize; i++) {
+                for (let j = 0; j < mazeSize; j++) {
+                    if (maze[i][j] === 1) {
+                        const wall = new THREE.Mesh(wallGeometry, wallMaterial);
+                        wall.position.set(i * wallSize - offset, wallHeight / 2, j * wallSize - offset);
+                        scene.add(wall);
+                        walls.push(wall);
+                    }
+                }
+            }
+        }
+
+        // --- FLOOR ---
+        const floorGeometry = new THREE.PlaneGeometry(mazeSize * wallSize, mazeSize * wallSize);
+        const floorMaterial = new THREE.MeshStandardMaterial({ color: 0xdeb887, side: THREE.DoubleSide });
+        const floor = new THREE.Mesh(floorGeometry, floorMaterial);
+        floor.rotation.x = -Math.PI / 2;
+        scene.add(floor);
+        
+        // --- GOAL ---
+        const goalGeometry = new THREE.CylinderGeometry(wallSize / 3, wallSize / 3, 1, 32);
+        const goalMaterial = new THREE.MeshStandardMaterial({ 
+            color: 0x00ff00, 
+            emissive: 0x00ff00, 
+            emissiveIntensity: 5,
+            metalness: 1.0,
+            roughness: 0
+        });
+        const goal = new THREE.Mesh(goalGeometry, goalMaterial);
+        const offset = (mazeSize * wallSize) / 2;
+        goal.position.set((mazeSize - 2) * wallSize - offset, 0.5, (mazeSize - 1) * wallSize - offset);
+        scene.add(goal);
+
+        // Place player at start
+        camera.position.set(1 * wallSize - offset, wallHeight / 2, 0 * wallSize - offset);
+
+        // --- COLLISION DETECTION ---
+        function checkCollisions() {
+            const playerBox = new THREE.Box3().setFromCenterAndSize(
+                camera.position,
+                new THREE.Vector3(1, 1, 1) // Player's bounding box
+            );
+
+            for(const wall of walls) {
+                const wallBox = new THREE.Box3().setFromObject(wall);
+                if (playerBox.intersectsBox(wallBox)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        // --- GAME LOOP ---
+        let lastTime = performance.now();
+        let gameWon = false;
+
+        function animate() {
+            requestAnimationFrame(animate);
+
+            const time = performance.now();
+            const delta = (time - lastTime) / 1000;
+
+            if (controls.isLocked === true && !gameWon) {
+                const prevPosition = camera.position.clone();
+
+                // Reset velocity
+                velocity.x -= velocity.x * 10.0 * delta;
+                velocity.z -= velocity.z * 10.0 * delta;
+
+                direction.z = Number(moveForward) - Number(moveBackward);
+                direction.x = Number(moveRight) - Number(moveLeft);
+                direction.normalize(); // this ensures consistent movements in all directions
+
+                if (moveForward || moveBackward) velocity.z -= direction.z * moveSpeed * 10.0 * delta;
+                if (moveLeft || moveRight) velocity.x -= direction.x * moveSpeed * 10.0 * delta;
+                
+                controls.moveRight(-velocity.x * delta);
+                controls.moveForward(-velocity.z * delta);
+                
+                // Collision detection and response
+                if (checkCollisions()) {
+                    camera.position.copy(prevPosition);
+                }
+
+                // Win condition
+                if (camera.position.distanceTo(goal.position) < 2) {
+                    gameWon = true;
+                    document.getElementById('win-message').style.display = 'block';
+                    controls.unlock();
+                }
+            }
+            
+            // Goal animation
+            goal.rotation.y += delta * 2;
+
+
+            lastTime = time;
+            renderer.render(scene, camera);
+        }
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        buildMaze();
+        animate();
+
+    </script>
+</body>
+</html>
