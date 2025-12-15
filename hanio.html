@@ -1,0 +1,588 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Canvas 汉诺塔</title>
+<style>
+body {
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  min-height: 100vh;
+  margin: 0;
+  background-color: #f0f4f8; 
+}
+.container {
+  background-color: #ffffff;
+  padding: 20px;
+  border-radius: 12px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+  text-align: center;
+}
+h1 {
+  color: #4a148c;
+  margin: 0; 
+}
+#hanoiCanvas {
+  border: 1px solid #ccc;
+  background-color: #e0e6ed; 
+  margin-bottom: 20px;
+  cursor: pointer;
+}
+.controls {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 800px; 
+  padding: 10px;
+  margin-bottom: 15px;
+}
+.setting, .status {
+  display: flex;
+  align-items: center;
+  font-size: 16px;
+  color: #555;
+}
+input[type="number"] {
+  padding: 8px;
+  width: 50px;
+  text-align: center;
+  border: 1px solid #a0a0a0;
+  border-radius: 4px;
+  margin: 0 10px;
+}
+button {
+  padding: 10px 15px;
+  background-color: #007bff;
+  color: white;
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+  transition: background-color 0.3s;
+  margin-left: 10px;
+}
+button:hover {
+  background-color: #0056b3;
+}
+.message {
+  color: #008000;
+  font-size: 1.2em;
+  font-weight: bold;
+  height: 30px;
+}
+</style>
+</head>
+<body>
+
+<div class="container">
+  <h1>🗼 Canvas 汉诺塔</h1>
+  
+  <div class="controls">
+    <div class="setting">
+      <label for="diskCountInput">盘子数量 (1-10):</label>
+      <input type="number" id="diskCountInput" value="1" min="1" max="10">
+      <button id="resetBtn" onclick="hanoiGame.resetGame(document.getElementById('diskCountInput').value)">开始游戏/重置</button>
+      <button id="solveBtn" onclick="hanoiGame.solveAutomatically()">自动完成</button>
+    </div>
+    <div class="status">
+        <p>当前盘数: <span id="currentDisks">1</span> | </p>
+      <p>步数: <span id="moveCount">0</span> | </p>
+      <p>最小步数: <span id="minMoves">1</span></p>
+    </div>
+  </div>
+
+  <canvas id="hanoiCanvas" width="800" height="450"></canvas>
+
+  <div id="message" class="message"></div>
+</div>
+
+<script>
+// --- 汉诺塔 Canvas 游戏核心逻辑 ---
+class HanoiGame {
+    constructor() {
+        this.canvas = document.getElementById('hanoiCanvas');
+        this.ctx = this.canvas.getContext('2d');
+        
+        // 绘图尺寸常量
+        this.CANVAS_WIDTH = 800;
+        this.CANVAS_HEIGHT = 450; 
+        this.BASE_HEIGHT = 40; 
+        this.POLE_WIDTH = 18; 
+        this.DISK_HEIGHT = 40; 
+        
+        this.TOP_MARGIN = 30; 
+
+        // 游戏状态
+        this.diskCount = 1;
+        this.towers = [[], [], []];
+        this.moveCount = 0;
+        this.isAnimating = false;
+        this.isSolving = false; // 跟踪自动演算状态
+        
+        // 交互状态
+        this.selectedTower = -1;
+        this.selectedDiskSize = 0;
+        
+        // 动画状态
+        this.animation = null;
+        this.animationDuration = 300; 
+
+        // 颜色和元素位置
+        this.POLE_X = [
+            this.CANVAS_WIDTH * 0.2, 
+            this.CANVAS_WIDTH * 0.5, 
+            this.CANVAS_WIDTH * 0.8  
+        ];
+        this.POLE_NAMES = ['A', 'B', 'C']; 
+        this.BASE_BOTTOM_Y = this.CANVAS_HEIGHT;
+        this.STACK_START_Y = this.CANVAS_HEIGHT - this.BASE_HEIGHT; 
+        this.POLE_START_Y = this.STACK_START_Y; 
+        this.POLE_RADIUS = 9; 
+        
+        this.POLE_TOP_Y = this.TOP_MARGIN;
+        this.POLE_HEIGHT = this.STACK_START_Y - this.POLE_TOP_Y;
+
+        // 新的盘子配色方案
+        this.colors = [
+            '#ff6347', // 1号盘 (最小盘)
+            '#ff8c00', // 2号盘
+            '#ffd700', // 3号盘
+            '#adff2f', // 4号盘
+            '#00ced1', // 5号盘
+            '#4169e1', // 6号盘
+            '#8a2be2', // 7号盘
+            '#ff69b4',  // 8号盘
+            '#C0C0C0',  // 9号盘
+            '#800000'   // 10号盘 (最大盘)
+        ];
+        
+        // DOM 引用
+        this.dom = {
+            count: document.getElementById('moveCount'),
+            min: document.getElementById('minMoves'),
+            current: document.getElementById('currentDisks'),
+            msg: document.getElementById('message'),
+            input: document.getElementById('diskCountInput'),
+            resetBtn: document.getElementById('resetBtn'),
+            solveBtn: document.getElementById('solveBtn'),
+        };
+
+        this.canvas.addEventListener('click', this.handleCanvasClick.bind(this));
+        
+        this.resetGame(this.diskCount);
+        this.gameLoop();
+    }
+    
+    // --- 绘图函数 ---
+    drawBase() {
+        this.ctx.fillStyle = '#6d4c41'; 
+        this.ctx.fillRect(0, this.STACK_START_Y, this.CANVAS_WIDTH, this.BASE_HEIGHT);
+    }
+
+    drawPole(index) {
+        const x = this.POLE_X[index];
+        const x0 = x - this.POLE_WIDTH / 2;
+        const x1 = x + this.POLE_WIDTH / 2;
+        const y0 = this.POLE_TOP_Y;
+        const y1 = this.POLE_START_Y;
+        const r = this.POLE_RADIUS;
+        
+        this.ctx.fillStyle = '#455a64'; 
+        
+        // 绘制圆角顶部立柱
+        this.ctx.beginPath();
+        this.ctx.moveTo(x0, y1);
+        this.ctx.lineTo(x0, y0 + r);
+        this.ctx.arcTo(x0, y0, x0 + r, y0, r);
+        this.ctx.lineTo(x1 - r, y0);
+        this.ctx.arcTo(x1, y0, x1, y0 + r, r);
+        this.ctx.lineTo(x1, y1);
+        this.ctx.closePath();
+        this.ctx.fill();
+
+        // 绘制柱子名称 (A, B, C) 在底座上
+        this.ctx.fillStyle = '#ffc107'; 
+        this.ctx.font = 'bold 24px Arial';
+        this.ctx.textAlign = 'center';
+        this.ctx.textBaseline = 'middle'; 
+        this.ctx.fillText(
+            this.POLE_NAMES[index], 
+            x, 
+            this.STACK_START_Y + this.BASE_HEIGHT / 2 
+        );
+    }
+
+    drawDisk(size, towerIndex, positionIndex) {
+        const maxDiskWidth = 200;
+        const minDiskWidth = 80;
+        
+        let width;
+        if (this.diskCount > 1) {
+            width = minDiskWidth + (maxDiskWidth - minDiskWidth) * (size - 1) / (this.diskCount - 1);
+        } else {
+            width = maxDiskWidth; 
+        }
+        
+        const x = this.POLE_X[towerIndex];
+        const y = this.STACK_START_Y - (positionIndex + 1) * this.DISK_HEIGHT; 
+
+        this.ctx.fillStyle = this.colors[size - 1]; 
+        
+        // 绘制盘子本体 (无缝隙，无描边)
+        this.ctx.beginPath();
+        this.ctx.roundRect(x - width / 2, y, width, this.DISK_HEIGHT, 5); 
+        this.ctx.fill();
+
+        // 绘制盘子编号
+        this.ctx.fillStyle = '#ffffff'; 
+        this.ctx.font = 'bold 18px Arial';
+        this.ctx.textAlign = 'center';
+        this.ctx.textBaseline = 'middle';
+        this.ctx.fillText(
+            size.toString(), 
+            x, 
+            y + (this.DISK_HEIGHT / 2)
+        );
+
+        // 选中高亮 (保留)
+        if (towerIndex === this.selectedTower && positionIndex === this.towers[towerIndex].length - 1) {
+            this.ctx.strokeStyle = 'yellow';
+            this.ctx.lineWidth = 3;
+            this.ctx.stroke();
+        }
+    }
+
+    drawScene() {
+        this.ctx.clearRect(0, 0, this.CANVAS_WIDTH, this.CANVAS_HEIGHT);
+        
+        this.drawBase();
+
+        for (let i = 0; i < 3; i++) {
+            this.drawPole(i);
+
+            this.towers[i].forEach((size, index) => {
+                this.drawDisk(size, i, index);
+            });
+        }
+        
+        if (this.animation) {
+            this.drawAnimatedDisk();
+        }
+    }
+    
+    // --- 动画绘制 ---
+    drawAnimatedDisk() {
+        const anim = this.animation;
+        if (!anim) return;
+
+        const progress = (Date.now() - anim.startTime) / this.animationDuration;
+        
+        let t = Math.min(1, progress);
+        
+        const startY = this.STACK_START_Y - (anim.startPos + 1) * this.DISK_HEIGHT;
+        const endY = this.STACK_START_Y - (anim.endPos + 1) * this.DISK_HEIGHT;
+        const topY = this.POLE_TOP_Y - 30; 
+        
+        const startX = this.POLE_X[anim.startTower];
+        const endX = this.POLE_X[anim.endTower];
+        
+        let currentX, currentY;
+
+        if (t < 0.33) { 
+            let p = t / 0.33;
+            currentX = startX;
+            currentY = startY + (topY - startY) * p;
+
+        } else if (t < 0.66) { 
+            let p = (t - 0.33) / 0.33;
+            currentX = startX + (endX - startX) * p;
+            currentY = topY;
+
+        } else { 
+            let p = (t - 0.66) / 0.34;
+            currentX = endX;
+            currentY = topY + (endY - topY) * p;
+        }
+        
+        // 绘制动画中的盘子
+        const size = anim.diskSize;
+        const maxDiskWidth = 200;
+        const minDiskWidth = 80;
+        
+        let width;
+        if (this.diskCount > 1) {
+            width = minDiskWidth + (maxDiskWidth - minDiskWidth) * (size - 1) / (this.diskCount - 1);
+        } else {
+            width = maxDiskWidth; 
+        }
+        
+        this.ctx.fillStyle = this.colors[size - 1]; 
+        
+        this.ctx.beginPath();
+        this.ctx.roundRect(currentX - width / 2, currentY, width, this.DISK_HEIGHT, 5);
+        this.ctx.fill();
+        
+        // 绘制动画盘子的编号
+        this.ctx.fillStyle = '#000000'; 
+        this.ctx.font = 'bold 18px Arial';
+        this.ctx.textAlign = 'center';
+        this.ctx.textBaseline = 'middle';
+        this.ctx.fillText(
+            size.toString(), 
+            currentX, 
+            currentY + (this.DISK_HEIGHT / 2)
+        );
+
+        // 动画结束
+        if (progress >= 1) {
+            this.animation = null;
+            this.isAnimating = false;
+            
+            this.checkWin();
+        }
+    }
+
+    gameLoop() {
+        this.drawScene();
+        requestAnimationFrame(this.gameLoop.bind(this));
+    }
+
+    // --- 游戏逻辑 ---
+
+    resetGame(n) {
+        if (this.isSolving) {
+            this.dom.msg.textContent = '正在自动演算，请稍后再试。';
+            return;
+        }
+        const defaultDisks = 1; 
+        const newDiskCount = Math.min(Math.max(parseInt(n) || defaultDisks, 1), 10); 
+        this.diskCount = newDiskCount;
+        
+        this.towers = [[], [], []];
+        for (let i = this.diskCount; i >= 1; i--) {
+            this.towers[0].push(i);
+        }
+
+        this.selectedTower = -1;
+        this.selectedDiskSize = 0;
+        this.moveCount = 0;
+        this.isAnimating = false;
+        this.animation = null;
+
+        this.dom.count.textContent = this.moveCount;
+        this.dom.min.textContent = Math.pow(2, this.diskCount) - 1;
+        this.dom.current.textContent = this.diskCount;
+        this.dom.input.value = this.diskCount;
+        this.dom.msg.textContent = `将所有盘子从 ${this.POLE_NAMES[0]} 柱移动到 ${this.POLE_NAMES[2]} 柱。`;
+        
+        this.drawScene();
+    }
+
+    checkWin() {
+        const isWin = this.towers[2].length === this.diskCount;
+
+        if (isWin) {
+            this.dom.msg.textContent = `🎉 恭喜！用 ${this.moveCount} 步完成了 ${this.diskCount} 个盘子的汉诺塔。`;
+
+            if (this.diskCount < 10) {
+                setTimeout(() => {
+                    const nextDiskCount = this.diskCount + 1;
+                    this.dom.msg.textContent = `即将升级到 ${nextDiskCount} 个盘子的新游戏...`;
+                    this.resetGame(nextDiskCount);
+                }, 3000); 
+            } else {
+                this.dom.msg.textContent += ' 已完成最高难度（10个盘子）！';
+            }
+        }
+    }
+
+    // --- 交互处理 (优化后) ---
+    handleCanvasClick(event) {
+        if (this.isAnimating || this.isSolving) {
+            this.dom.msg.textContent = '请等待自动操作完成！';
+            return;
+        }
+
+        const rect = this.canvas.getBoundingClientRect();
+        const clickX = event.clientX - rect.left;
+
+        const towerAreaWidth = this.CANVAS_WIDTH / 3;
+        let targetTower = -1;
+        if (clickX < towerAreaWidth) {
+            targetTower = 0;
+        } else if (clickX < towerAreaWidth * 2) {
+            targetTower = 1;
+        } else {
+            targetTower = 2;
+        }
+        
+        this.processMove(targetTower);
+    }
+
+    processMove(targetTower) {
+        const sourceTower = this.selectedTower;
+
+        // 1. 未选中源盘时 (选中阶段)
+        if (sourceTower === -1) {
+            if (this.towers[targetTower].length > 0) {
+                // 选中新盘
+                this.selectedTower = targetTower;
+                this.selectedDiskSize = this.towers[targetTower][this.towers[targetTower].length - 1];
+                this.dom.msg.textContent = `已选择 ${this.selectedDiskSize} 号盘 (${this.POLE_NAMES[targetTower]} 柱)。点击目标柱子或新源盘。`;
+            } else {
+                this.dom.msg.textContent = '该柱子没有盘子可选择。';
+            }
+        } 
+        // 2. 已选中源盘时 (移动或更换源盘阶段)
+        else {
+            // 如果点击了源柱，或者目标柱子顶部没有盘子/盘子太小 (即尝试移动)
+            if (targetTower !== sourceTower) {
+                
+                const diskToMoveSize = this.selectedDiskSize;
+                const topDiskOnTargetSize = this.towers[targetTower].length > 0 ? 
+                                            this.towers[targetTower][this.towers[targetTower].length - 1] : 
+                                            Infinity; 
+
+                // 汉诺塔规则检查
+                if (diskToMoveSize < topDiskOnTargetSize) {
+                    
+                    // 移动成功: 执行动画和数据更新 (省略动画代码，只保留逻辑)
+                    this.animation = {
+                        diskSize: diskToMoveSize,
+                        startTower: sourceTower,
+                        endTower: targetTower,
+                        startPos: this.towers[sourceTower].length - 1, 
+                        endPos: this.towers[targetTower].length,      
+                        startTime: Date.now()
+                    };
+                    
+                    this.towers[sourceTower].pop(); 
+                    this.towers[targetTower].push(diskToMoveSize); 
+                    
+                    this.moveCount++;
+                    this.dom.count.textContent = this.moveCount;
+                    this.dom.msg.textContent = `正在移动 ${diskToMoveSize} 号盘从 ${this.POLE_NAMES[sourceTower]} 柱到 ${this.POLE_NAMES[targetTower]} 柱...`;
+
+                    // 移动完成后，重置选中状态
+                    this.selectedTower = -1;
+                    this.selectedDiskSize = 0;
+
+                } else {
+                    // 违反规则，**取消当前选择**，然后尝试选中新盘
+                    this.dom.msg.textContent = '❌ 违反规则！不能将大盘子放在小盘子上。请重新选择。';
+                    
+                    // 失败后，立即重置选中状态
+                    this.selectedTower = -1;
+                    this.selectedDiskSize = 0;
+                }
+            } else {
+                // 3. 已选中源盘，但点击了源盘所在柱子 (新逻辑：自动取消选中，并尝试选中新盘)
+                
+                // 检查新点击的柱子上是否有盘子可供选择
+                if (this.towers[targetTower].length > 0) {
+                    // 取消旧的选择
+                    this.selectedTower = -1;
+                    this.selectedDiskSize = 0;
+                    this.dom.msg.textContent = '已取消旧选择。';
+                    
+                    // 然后递归调用自己，再次尝试处理这次点击（选中新盘或提示无盘）
+                    this.processMove(targetTower);
+                } else {
+                     // 如果点击的是源柱，但此时源柱盘子已被移动，则仅取消选中
+                     this.selectedTower = -1;
+                     this.selectedDiskSize = 0;
+                     this.dom.msg.textContent = '已取消选择。';
+                }
+            }
+        }
+    }
+    
+    // --- 自动演算相关方法 ---
+
+    toggleControls(enabled) {
+        this.dom.input.disabled = !enabled;
+        this.dom.resetBtn.disabled = !enabled;
+        this.dom.solveBtn.disabled = !enabled;
+    }
+
+    async solveAutomatically() {
+        if (this.isAnimating || this.isSolving) {
+            this.dom.msg.textContent = '正在执行操作，请稍候。';
+            return;
+        }
+
+        this.isSolving = true;
+        this.toggleControls(false);
+        this.dom.msg.textContent = '开始自动演算...';
+
+        this.resetGame(this.diskCount);
+        // 短暂延迟以确保重置渲染完成
+        await new Promise(res => setTimeout(res, 100));
+
+        const moves = [];
+        this.generateMoves(this.diskCount, 0, 2, 1, moves);
+
+        for (const move of moves) {
+            // 等待上一个动画结束
+            while (this.isAnimating) {
+                await new Promise(res => setTimeout(res, 50));
+            }
+            
+            this.performMove(move.from, move.to);
+            
+            // 设置每次移动开始的间隔
+            await new Promise(res => setTimeout(res, 500));
+        }
+        
+        // 等待最后一个动画结束
+        while (this.isAnimating) {
+            await new Promise(res => setTimeout(res, 50));
+        }
+
+        this.isSolving = false;
+        this.toggleControls(true);
+        // 胜利消息将由 checkWin() 在最后一次动画结束时设置
+    }
+
+    generateMoves(n, src, dst, aux, moves) {
+        if (n > 0) {
+            this.generateMoves(n - 1, src, aux, dst, moves);
+            moves.push({ from: src, to: dst });
+            this.generateMoves(n - 1, aux, dst, src, moves);
+        }
+    }
+
+    performMove(fromTower, toTower) {
+        const diskToMoveSize = this.towers[fromTower][this.towers[fromTower].length - 1];
+
+        this.isAnimating = true; // 手动启动动画状态
+        this.animation = {
+            diskSize: diskToMoveSize,
+            startTower: fromTower,
+            endTower: toTower,
+            startPos: this.towers[fromTower].length - 1,
+            endPos: this.towers[toTower].length,
+            startTime: Date.now()
+        };
+        
+        // 更新数据模型
+        this.towers[fromTower].pop();
+        this.towers[toTower].push(diskToMoveSize);
+
+        this.moveCount++;
+        this.dom.count.textContent = this.moveCount;
+        this.dom.msg.textContent = `移动 ${diskToMoveSize} 号盘从 ${this.POLE_NAMES[fromTower]} 到 ${this.POLE_NAMES[toTower]}...`;
+
+        // 重置用户交互状态
+        this.selectedTower = -1;
+        this.selectedDiskSize = 0;
+    }
+}
+
+const hanoiGame = new HanoiGame();
+</script>
+</body>
+</html>
